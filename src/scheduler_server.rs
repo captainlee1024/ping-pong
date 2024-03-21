@@ -1,4 +1,5 @@
 use tonic::{transport::Server, Request, Response, Status};
+use std::time::Duration;
 
 pub mod ping_pong {
     tonic::include_proto!("pingpong");
@@ -13,6 +14,9 @@ pub struct PingPongService;
 impl PingPong for PingPongService {
     async fn ping(&self, request: Request<PingRequest>) -> Result<Response<PongResponse>, Status> {
         println!("Received request: {:?}", request);
+
+        // Sleep for 10 seconds
+        tokio::time::sleep(Duration::from_secs(10)).await;
 
         // Echo back the received message
         let response = PongResponse {
