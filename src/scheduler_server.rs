@@ -1,38 +1,60 @@
 use tonic::{transport::Server, Request, Response, Status};
-use std::time::Duration;
+use std::{pin::Pin, time::Duration};
+use tokio_stream::Stream;
+use tokio_stream::StreamExt;
+use tokio::sync::mpsc;
+use pingpong::{PongResponse, PingRequest, ping_pong_server::PingPong};
 
-pub mod ping_pong {
+pub mod pingpong {
     tonic::include_proto!("pingpong");
 }
-
-use ping_pong::{PongResponse, PingRequest, ping_pong_server::PingPong};
 
 #[derive(Default)]
 pub struct PingPongService;
 
 #[tonic::async_trait]
 impl PingPong for PingPongService {
-    async fn ping(&self, request: Request<PingRequest>) -> Result<Response<PongResponse>, Status> {
-        println!("Received request: {:?}", request);
+    type PingStreamStream = Pin<Box<dyn Stream<Item = Result<PongResponse, Status>> + Send + Sync + 'static>>;
 
-        // Sleep for 10 seconds
-        tokio::time::sleep(Duration::from_secs(10)).await;
+    async fn ping_stream(&self, request: Request<tonic::Streaming<PingRequest>>) -> Result<Response<Self::PingStreamStream>, Status> {
+        let mut stream = request.into_inner();
+        let (mut tx, rx) = mpsc::channel(10);
 
-        // Echo back the received message
-        let response = PongResponse {
-            message: "pong".into(),
-        };
+        // Spawn a task to process the incoming stream and send responses to the channel
+        tokio::spawn(async move {
+            while let Some(request) = stream.next().await {
+                match request {
+                    Ok(request) => {
+                        // Sleep for 10 seconds
+                        tokio::time::sleep(Duration::from_secs(2)).await;
 
-        Ok(Response::new(response))
+                        println!("recv from client: {}", request.message);
+
+                        let response = PongResponse {
+                            message: "pong".into(),
+                        };
+                        if let Err(_) = tx.send(Ok(response)).await {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(Status::internal(format!("Error: {}", e)))) .await;
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(Response::new(Box::pin(tokio_stream::wrappers::ReceiverStream::new(rx))))
     }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = "[::1]:50051".parse()?;
-    let svc = ping_pong::ping_pong_server::PingPongServer::new(PingPongService::default());
+    let svc = pingpong::ping_pong_server::PingPongServer::new(PingPongService::default());
 
-    println!("Server listening on {}", addr);
+    println!("PingPong server listening on {}", addr);
 
     Server::builder()
         .add_service(svc)
