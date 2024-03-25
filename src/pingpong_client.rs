@@ -1,6 +1,5 @@
-use tonic::{transport::Channel, Request, Response};
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
 pub mod pingpong {
     tonic::include_proto!("pingpong");
@@ -16,16 +15,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // let mut client = pingpong::ping_pong_client::PingPongClient::new(channel);
 
-    let mut client = ping_pong_client::PingPongClient::connect(addr.clone())
-        .await?;
+    let mut client = ping_pong_client::PingPongClient::connect(addr).await?;
 
     // Create a channel for sending requests
-    let (mut tx, rx) = mpsc::channel(10);
+    let (tx, rx) = mpsc::channel(10);
 
     // 握手
-    tx.send(PingRequest{
-        message: "ping".into()
-    }).await?;
+    tx.send(PingRequest {
+        message: "ping".into(),
+    })
+    .await?;
 
     // 创建请求
     let request = ReceiverStream::new(rx);
@@ -37,15 +36,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut inbound = response.into_inner();
     let mut i = 1;
     while let Some(recv_msg) = inbound.message().await? {
-         println!("recv from server: {}", recv_msg.message);
+        println!("recv from server: {}", recv_msg.message);
         i += 1;
         if i > 3 {
-            break
+            break;
         }
 
-        tx.send(PingRequest{
-            message: format!("ping{i}").into()
-        }).await?;
+        tx.send(PingRequest {
+            message: format!("ping{i}").into(),
+        })
+        .await?;
     }
 
     Ok(())
