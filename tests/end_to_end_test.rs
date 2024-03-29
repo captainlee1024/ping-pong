@@ -1,9 +1,16 @@
+use pingpong::pingpongcs::client::{PingPongClient, PingPongClientHandler};
+use pingpong::pingpongcs::server::{launch_scheduler_server_with_addr, PingPongServiceHandler};
+use std::sync::Arc;
+
 #[tokio::test]
-async fn test_ping_stream_e2e() {
+async fn test_ping_pong_stream_e2e() {
     // Start the server
     let server_addr = "[::1]:50051".to_string();
+    let ping_pong_handler = Arc::new(PingPongServiceHandler::default());
     let server_future = tokio::spawn(async move {
-        pingpong::pingpongcs::server::launch_scheduler_server_with_addr(server_addr).await.unwrap();
+        launch_scheduler_server_with_addr(server_addr, ping_pong_handler)
+            .await
+            .unwrap();
     });
 
     // Give the server a little time to start
@@ -11,8 +18,10 @@ async fn test_ping_stream_e2e() {
 
     // Run the client
     let client_addr = "http://[::1]:50051".to_string();
+    let handler = Arc::new(PingPongClientHandler::default());
+    let client = PingPongClient::new(client_addr, handler);
     let client_future = tokio::spawn(async move {
-        pingpong::pingpongcs::client::run_with_addr(client_addr).await.unwrap();
+        client.launch_service().await.unwrap();
     });
 
     // Wait for the client to finish

@@ -1,9 +1,7 @@
 use pingpong::{ping_pong_server::PingPong, PingRequest, PongResponse};
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::{pin::Pin, time::Duration};
 use tokio::sync::mpsc;
-use tokio::sync::Mutex as TokioMutex;
 use tokio_stream::Stream;
 use tokio_stream::StreamExt;
 use tonic::{async_trait, transport::Server, Request, Response, Status};
@@ -13,37 +11,12 @@ pub mod pingpong {
 }
 
 pub struct PingPongService {
-    scheduler: Arc<TokioMutex<Scheduler>>,
-}
-
-#[derive(Default)]
-pub struct Scheduler {
-    pub name: String,
-    // TODO: TaskName -> TaskType
-    pub task_sender_table:
-        HashMap<TaskName, Arc<mpsc::Sender<(BatchContext, mpsc::Sender<String>)>>>,
-    pub task_receiver_table: HashMap<
-        TaskName,
-        Arc<tokio::sync::Mutex<mpsc::Receiver<(BatchContext, mpsc::Sender<String>)>>>,
-    >,
-    // TODO: TaskName -> ServiceType
-    pub service_table: HashMap<TaskName, HashMap<String, String>>,
-}
-
-pub type BatchContext = String;
-pub type TaskName = String;
-
-impl Scheduler {
-    pub fn new(name: String) -> Self {
-        let mut s = Scheduler::default();
-        s.name = name;
-        s
-    }
+    pub ping_pong_handler: Arc<dyn PingPongHandler + Send + Sync>,
 }
 
 impl PingPongService {
-    pub fn new(scheduler: Arc<TokioMutex<Scheduler>>) -> Self {
-        PingPongService { scheduler }
+    pub fn new(ping_pong_handler: Arc<dyn PingPongHandler + Send + Sync>) -> Self {
+        PingPongService { ping_pong_handler }
     }
 }
 
@@ -62,8 +35,7 @@ impl PingPong for PingPongService {
     ) -> Result<Response<Self::PingStreamStream>, Status> {
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(10);
-        let current_scheduler = Arc::clone(&self.scheduler);
-        let handler = PingPongServiceHandler::default();
+        let handler = self.ping_pong_handler.clone();
 
         // Spawn a task to process the incoming stream and send responses to the channel
         tokio::spawn(async move {
@@ -77,15 +49,14 @@ impl PingPong for PingPongService {
                                 // tokio::spawn(async move {
                                     // Sleep for 10 seconds
                                     tokio::time::sleep(Duration::from_secs(2)).await;
-                                    println!("scheduer: {:?}", current_scheduler.lock().await.name);
 
                                     println!("recv from client: {}", request.message);
                                     if request.message == "registry" {
                                         // registry
                                          println!("registry done: {}", request.message);
 
-                                    if let Err(_) = tx.send(Ok(PongResponse{
-                                        message: "registry done".into(),})).await {
+                                    if tx.send(Ok(PongResponse{
+                                        message: "registry done".into(),})).await.is_err() {
                                         // If sending fails, it means the receiver has been dropped, so we should stop processing
                                         break;
                                     }
@@ -96,13 +67,13 @@ impl PingPong for PingPongService {
                                 // let response  = handle_ping().await;
                                 let response = handler.handle_ping(request).await;
 
-                                    if let Err(_) = tx.send(Ok(response)).await {
+                                    if tx.send(Ok(response)).await.is_err() {
                                         // If sending fails, it means the receiver has been dropped, so we should stop processing
                                         break;
                                     }
                             }
                             Err(e) => {
-                                println!("client exit: {}", e.to_string());
+                                println!("client exit: {}", e);
                                 let _ = tx.send(Err(Status::internal(format!("Error: {}", e)))).await;
                                 break;
                             }
@@ -135,22 +106,24 @@ impl PingPongHandler for PingPongServiceHandler {
     async fn handle_ping(&self, ping_request: PingRequest) -> PongResponse {
         if ping_request.message != "ping" {
             return PongResponse {
-                message: format!("unexpect message {}", ping_request.message).into(),
+                message: format!("unexpect message {}", ping_request.message),
             };
         }
 
         PongResponse {
-            message: format!("pong").into(),
+            message: "pong".to_string(),
         }
     }
 }
 
 pub async fn launch_scheduler_server_with_addr(
     addr: String,
+    ping_pong_handler: Arc<dyn PingPongHandler + Send + Sync>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let socket_addr = addr.parse()?;
-    let scheduler = Arc::new(TokioMutex::new(Scheduler::new("scheduler".into())));
-    let svc = pingpong::ping_pong_server::PingPongServer::new(PingPongService::new(scheduler));
+    // let ping_pong_handler = Arc::new(PingPongServiceHandler::default());
+    let svc =
+        pingpong::ping_pong_server::PingPongServer::new(PingPongService::new(ping_pong_handler));
 
     println!("PingPong server listening on {}", socket_addr);
 
