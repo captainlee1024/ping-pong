@@ -22,6 +22,8 @@ mockall = "0.10.2"
 
 [dev-dependencies]
 mockall = "0.10.2"
+tokio-test = "0.2.1"
+tonic = "0.8.1"
 
 [build-dependencies]
 tonic-build = "0.8.0"
