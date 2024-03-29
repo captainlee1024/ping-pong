@@ -1,3 +1,5 @@
+mod pingpong_client;
+
 use pingpong::{ping_pong_server::PingPong, PingRequest, PongResponse};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -6,7 +8,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex as TokioMutex;
 use tokio_stream::Stream;
 use tokio_stream::StreamExt;
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{async_trait, transport::Server, Request, Response, Status};
 
 pub mod pingpong {
     tonic::include_proto!("pingpong");
@@ -63,6 +65,7 @@ impl PingPong for PingPongService {
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(10);
         let current_scheduler = Arc::clone(&self.scheduler);
+        let handler = PingPongServiceHandler::default();
 
         // Spawn a task to process the incoming stream and send responses to the channel
         tokio::spawn(async move {
@@ -79,15 +82,26 @@ impl PingPong for PingPongService {
                                     println!("scheduer: {:?}", current_scheduler.lock().await.name);
 
                                     println!("recv from client: {}", request.message);
+                                    if request.message == "registry" {
+                                        // registry
+                                         println!("registry done: {}", request.message);
 
-                                    let response = PongResponse {
-                                        message: "pong".into(),
-                                    };
+                                    if let Err(_) = tx.send(Ok(PongResponse{
+                                        message: "registry done".into(),})).await {
+                                        // If sending fails, it means the receiver has been dropped, so we should stop processing
+                                        break;
+                                    }
+                                        continue;
+                                    }
+
+
+                                // let response  = handle_ping().await;
+                                let response = handler.handle_ping(request).await;
+
                                     if let Err(_) = tx.send(Ok(response)).await {
                                         // If sending fails, it means the receiver has been dropped, so we should stop processing
                                         break;
                                     }
-                                // });
                             }
                             Err(e) => {
                                 println!("client exit: {}", e.to_string());
@@ -111,6 +125,28 @@ impl PingPong for PingPongService {
     }
 }
 
+
+#[async_trait]
+pub trait PingPongHandler {
+    async fn handle_ping(&self, ping_request: PingRequest) -> PongResponse;
+}
+
+#[derive(Default)]
+pub struct PingPongServiceHandler {}
+#[async_trait]
+impl PingPongHandler for PingPongServiceHandler {
+    async fn handle_ping(&self, ping_request: PingRequest) -> PongResponse {
+        if ping_request.message != "ping" {
+            return PongResponse {
+                message: format!("unexpect message {}", ping_request.message).into(),
+            };
+        }
+
+        PongResponse {
+            message: format!("pong").into(),
+        }
+    }
+}
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = "[::1]:50051".parse()?;
