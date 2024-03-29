@@ -26,5 +26,5 @@ mockall = "0.10.2"
 [build-dependencies]
 tonic-build = "0.8.0"
 [lib]
-name = "ping_client"
-path = "src/lib/client.rs"
+name = "pingpong"
+path = "src/lib.rs"

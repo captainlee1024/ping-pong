@@ -1,8 +1,8 @@
+use mockall::automock;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::async_trait;
 use tonic::transport::Channel;
-use mockall::automock;
 
 pub mod pingpong {
     tonic::include_proto!("pingpong");
@@ -11,13 +11,14 @@ pub mod pingpong {
 use pingpong::{ping_pong_client, PingRequest, PongResponse};
 
 pub async fn run_with_addr(addr: String) -> Result<(), Box<dyn std::error::Error>> {
-
     // let channel = Channel::from_static(addr);
 
     // let mut client = pingpong::ping_pong_client::PingPongClient::new(channel);
 
     let mut client = ping_pong_client::PingPongClient::connect(addr).await?;
-    let ping_pong_client = PingPongClient { client: client.clone() };
+    let ping_pong_client = PingPongClient {
+        client: client.clone(),
+    };
 
     // Create a channel for sending requests
     let (tx, rx) = mpsc::channel(10);
@@ -52,8 +53,6 @@ pub async fn run_with_addr(addr: String) -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
-
-
 pub struct PingPongClient {
     pub client: ping_pong_client::PingPongClient<Channel>,
 }
@@ -82,20 +81,18 @@ pub trait PingPongHandler {
 
 #[cfg(test)]
 mod tests {
-    use std::future;
     use super::*;
-    use mockall::predicate::*;
-    use pingpong::{ping_pong_client, PingRequest, PongResponse};
+    use pingpong::PingRequest;
+    use std::future;
 
     #[tokio::test]
     async fn test_handle_ping() {
         let mut mock = MockPingPongHandler::new();
-        mock.expect_handle_ping()
-            .returning(|_, _| {
-                Box::pin(future::ready(PingRequest {
-                    message: "mock ping".into(),
-                }))
-            });
+        mock.expect_handle_ping().returning(|_, _| {
+            Box::pin(future::ready(PingRequest {
+                message: "mock ping".into(),
+            }))
+        });
 
         // 使用mock进行测试...
     }
